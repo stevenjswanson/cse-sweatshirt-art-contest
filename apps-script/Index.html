@@ -14,50 +14,124 @@
       <p>Signed in as <b><?= email ?></b></p>
       <form id="entry">
         <p><label>Your name<br><input type="text" id="name" maxlength="200" required></label></p>
-        <p><label>Image (PNG, JPEG, GIF, WebP, or SVG; max 10 MB)<br>
-          <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" required></label></p>
+        <p><label>Artwork (PNG or PDF)<br>
+          <input type="file" id="file" accept="image/png,application/pdf,.png,.pdf" required></label></p>
+        <p id="rules"></p>
         <p><button type="submit" id="submit">Submit</button></p>
       </form>
       <p id="status"></p>
 
+      <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
       <script>
-        const MAX_BYTES = 10 * 1024 * 1024;
+        const CONFIG = <?!= JSON.stringify(config) ?>;
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
         const form = document.getElementById('entry');
         const statusEl = document.getElementById('status');
         const submitBtn = document.getElementById('submit');
+        const ratio = CONFIG.aspectRatio.width + ':' + CONFIG.aspectRatio.height;
+
+        document.getElementById('rules').textContent =
+          'Max ' + (CONFIG.maxBytes / 1024 / 1024) + ' MB. Aspect ratio ' + ratio +
+          '. PNGs must be at least ' + CONFIG.pngMinWidth + 'x' + CONFIG.pngMinHeight + ' pixels.';
 
         function setStatus(msg) { statusEl.textContent = msg; }
 
-        form.addEventListener('submit', function (e) {
+        function aspectOk(width, height) {
+          const want = CONFIG.aspectRatio.width / CONFIG.aspectRatio.height;
+          return Math.abs((width / height) / want - 1) <= CONFIG.aspectTolerance;
+        }
+
+        function readAsDataUrl(file) {
+          return new Promise(function (resolve, reject) {
+            const reader = new FileReader();
+            reader.onload = function () { resolve(reader.result); };
+            reader.onerror = function () { reject(new Error('Could not read the file.')); };
+            reader.readAsDataURL(file);
+          });
+        }
+
+        function pngSize(dataUrl) {
+          return new Promise(function (resolve, reject) {
+            const img = new Image();
+            img.onload = function () { resolve({ width: img.naturalWidth, height: img.naturalHeight }); };
+            img.onerror = function () { reject(new Error('Could not read the PNG.')); };
+            img.src = dataUrl;
+          });
+        }
+
+        // Returns [{width, height}] in PDF points for every page, honoring page rotation.
+        async function pdfPageSizes(file) {
+          const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+          const sizes = [];
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const viewport = (await pdf.getPage(i)).getViewport({ scale: 1 });
+            sizes.push({ width: viewport.width, height: viewport.height });
+          }
+          await pdf.destroy();
+          return sizes;
+        }
+
+        async function validate(file, dataUrl) {
+          if (file.size > CONFIG.maxBytes) throw new Error('File is larger than ' + (CONFIG.maxBytes / 1024 / 1024) + ' MB.');
+          const isPng = file.type === 'image/png' || /\.png$/i.test(file.name);
+          const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+          if (isPng) {
+            const s = await pngSize(dataUrl);
+            if (s.width < CONFIG.pngMinWidth || s.height < CONFIG.pngMinHeight) {
+              throw new Error('PNG is ' + s.width + 'x' + s.height + '; minimum is ' + CONFIG.pngMinWidth + 'x' + CONFIG.pngMinHeight + '.');
+            }
+            if (!aspectOk(s.width, s.height)) throw new Error('PNG is ' + s.width + 'x' + s.height + '; aspect ratio must be ' + ratio + '.');
+            return null;
+          }
+          if (isPdf) {
+            let sizes;
+            try { sizes = await pdfPageSizes(file); } catch (e) { throw new Error('Could not read the PDF: ' + e.message); }
+            sizes.forEach(function (s, i) {
+              if (!aspectOk(s.width, s.height)) throw new Error('PDF page ' + (i + 1) + ' aspect ratio must be ' + ratio + '.');
+            });
+            return sizes;
+          }
+          throw new Error('Only PNG and PDF files are accepted.');
+        }
+
+        form.addEventListener('submit', async function (e) {
           e.preventDefault();
           const name = document.getElementById('name').value.trim();
           const file = document.getElementById('file').files[0];
-          if (!name || !file) { setStatus('Please enter your name and choose an image.'); return; }
-          if (file.size > MAX_BYTES) { setStatus('Image is larger than 10 MB.'); return; }
+          if (!name || !file) { setStatus('Please enter your name and choose a file.'); return; }
 
           submitBtn.disabled = true;
-          setStatus('Uploading…');
-
-          const reader = new FileReader();
-          reader.onload = function () {
-            const base64 = reader.result.split(',')[1]; // strip "data:<mime>;base64,"
-            google.script.run
-              .withSuccessHandler(function (res) {
-                setStatus('Thanks! Your entry was received (' + res.fileName + ').');
-                form.reset();
-                submitBtn.disabled = false;
-              })
-              .withFailureHandler(function (err) {
-                setStatus('Error: ' + err.message);
-                submitBtn.disabled = false;
-              })
-              .submitEntry({ name: name, fileName: file.name, mimeType: file.type, base64: base64 });
-          };
-          reader.onerror = function () {
-            setStatus('Could not read the file.');
+          setStatus('Checking file…');
+          let dataUrl, pdfSizes;
+          try {
+            dataUrl = await readAsDataUrl(file);
+            pdfSizes = await validate(file, dataUrl);
+          } catch (err) {
+            setStatus('Error: ' + err.message);
             submitBtn.disabled = false;
-          };
-          reader.readAsDataURL(file);
+            return;
+          }
+
+          setStatus('Uploading…');
+          google.script.run
+            .withSuccessHandler(function (res) {
+              setStatus('Thanks! Your entry was received (' + res.fileName + ').');
+              form.reset();
+              submitBtn.disabled = false;
+            })
+            .withFailureHandler(function (err) {
+              setStatus('Error: ' + err.message);
+              submitBtn.disabled = false;
+            })
+            .submitEntry({
+              name: name,
+              fileName: file.name,
+              mimeType: file.type,
+              base64: dataUrl.split(',')[1], // strip "data:<mime>;base64,"
+              pdfPageSizes: pdfSizes,
+            });
         });
       </script>
     <? } ?>
