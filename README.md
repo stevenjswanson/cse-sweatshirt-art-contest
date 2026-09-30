@@ -4,38 +4,85 @@ Google Apps Script web app. A signed-in @ucsd.edu user enters their name and upl
 The file goes to the contest Drive folder; a metadata row goes to the contest spreadsheet.
 
 ## Status
-- Code is written and the validation helpers pass the local tests below.
-- **Not yet deployed or run inside Apps Script.** Unverified there: `Session.getActiveUser()` returning the email under "Execute as: Me", pdf.js loading from jsdelivr inside the HtmlService iframe, and upload behavior near the 10 MB cap.
+- Server logic passes the local tests (`tests/`), which run the real `Code.gs` against fake Google services.
+- **Not yet deployed or run inside Apps Script.** Unverified there: the pinned `oauthScopes` (Google's reference docs were unreachable when they were written), `Session.getActiveUser()` returning the email under "Execute as: Me", pdf.js loading from jsdelivr inside the HtmlService iframe, and upload behavior near the 10 MB cap. `diagnose()` exercises the Drive and Sheets scopes; a submission from `/dev` exercises the rest.
 - Styling has not been done yet (intentionally deferred).
 
 ## Layout
-- `apps-script/` — the Apps Script project (the only files that get deployed).
-- `tests/` — local Node tests of the validation logic.
+- `apps-script/` — the Apps Script project. `.claspignore` is an allowlist: only `appsscript.json`, `Code.gs`, `Index.html` are pushed.
+- `tests/` — Node tests (not pushed).
+- `scripts/safe-deploy.sh` — release script (push → verify → version → update the existing deployment).
 
 ## Files (`apps-script/`)
-- `Code.gs` — server: auth check, validation, Drive upload, Sheet logging. IDs and the `CONFIG` rules are constants at the top.
+- `Code.gs` — server: auth, validation, Drive upload, Sheet logging. `CONFIG` (file rules) and `COLS` (sheet headers) are at the top. `setupSheets()` and `diagnose()` are owner-only and meant to be run from the editor.
 - `Index.html` — the form.
-- `appsscript.json` — manifest: runs as the deploying user, access limited to the owner's Workspace domain.
+- `appsscript.json` — manifest: runs as the deploying user, access limited to the owner's Workspace domain, scopes pinned (Drive, Sheets, userinfo.email).
 
-## Deploy
-1. Signed in as your **@ucsd.edu** account, go to https://script.google.com → New project.
-2. Project Settings → check "Show appsscript.json manifest file in editor".
-3. Replace `Code.gs` and `appsscript.json` contents with the files in `apps-script/`; add an HTML file named `Index` and paste `Index.html`.
-4. Run `doGet` once from the editor to grant Drive/Sheets/email permissions.
-5. Deploy → New deployment → Web app. Execute as: **Me**. Who has access: **Anyone within UC San Diego**.
-6. Share the `/exec` URL.
+## Script Properties (required)
+The repo is public, so resource ids are not in the code. Set these under Project Settings → Script Properties:
 
-(Alternative: `npm i -g @google/clasp`, `clasp create --type webapp --rootDir apps-script`, `clasp push`.)
+| Property | Value |
+|---|---|
+| `FOLDER_ID` | id of the Drive folder that receives uploads (the part after `/folders/` in its URL) |
+| `SPREADSHEET_ID` | id of the metadata spreadsheet (the part after `/d/` in its URL) |
 
-## Resources
-- Drive folder (uploads): https://drive.google.com/drive/folders/1HhgiMdHCTl52irrKl4fvTiyTGC9sTAcn — appears to be in a shared drive; the deploying account needs permission to add files.
-- Metadata sheet: https://docs.google.com/spreadsheets/d/1bw3KXp7GE4cgoadDNle9OSo8UQaGtwWx3ODEaTbTd1k (tab `Sheet1`).
+The deploying account needs permission to add files to the folder (it appears to be in a shared drive) and to edit the sheet.
+
+## First deployment (clasp v3)
+Prerequisites: enable the Apps Script API at https://script.google.com/home/usersettings; `npm i -g @google/clasp`; `clasp login` as your **@ucsd.edu** account; `clasp --version` shows 3.x.
+
+```bash
+cd apps-script
+clasp create-script --title "CSE Sweatshirt Art Contest" --type standalone --rootDir .
+git checkout appsscript.json      # create-script overwrites the manifest; restore ours
+clasp status                      # must list only appsscript.json, Code.gs, Index.html
+clasp push -f
+```
+Then in the editor (`clasp open-script`):
+1. Set the two Script Properties above.
+2. Run `setupSheets` (first in the Run menu). Accept the permission prompt. It creates the `Sheet1` tab if missing and appends any missing headers; it never reorders or deletes.
+3. Run `diagnose` and read the log: folder reachable, every column resolved, no `MISSING`/`ERROR`.
+4. Open `https://script.google.com/macros/s/<SCRIPT_ID>/dev` (serves the pushed code; editors only) and submit a test PNG and PDF. Check the Drive folder and sheet, then delete the test rows/files.
+
+Then create the one production deployment:
+```bash
+clasp create-version "initial"
+clasp create-deployment --versionNumber 1 --description "prod"
+clasp list-deployments --json     # confirm the prod deployment has a versionNumber (pinned)
+```
+Record the deployment id below. **Never run `create-deployment` again** — a new deployment is a new URL.
+
+| Deployment | Id | Access |
+|---|---|---|
+| prod | _(fill in)_ | Anyone within UC San Diego (`DOMAIN`) |
+
+Public URL (domain-scoped form; the plain `/macros/s/…/exec` form may 404 for a domain app):
+`https://script.google.com/a/macros/ucsd.edu/s/<DEPLOYMENT_ID>/exec`
+
+Verify on `/exec` from a second @ucsd.edu account (not the owner) and from a non-UCSD account, which should get a Google sign-in wall rather than the form.
+
+## Releasing a change
+```bash
+cd apps-script
+../scripts/safe-deploy.sh <DEPLOYMENT_ID> "what changed"
+```
+It shows what will be pushed, pushes to HEAD (users unaffected), stops while you run `diagnose()` in the editor and/or try `/dev`, and only on `yes` creates a version and points the existing deployment at it.
+
+## Rollback
+```bash
+clasp update-deployment <DEPLOYMENT_ID> --versionNumber <previous>
+```
+Versions are immutable, so this is immediate and complete.
+
+## Changing OAuth scopes
+Scopes are pinned in `appsscript.json`, so adding one does not re-prompt for consent. To re-consent: remove the `oauthScopes` block, push, run any function in the editor and accept, restore the block, push again.
 
 ## Sheet columns
-Timestamp, Email, Name, File name, File ID, File URL, MIME type, Size (bytes), Dimensions. The header row is written on the first submission if the sheet is empty.
+Timestamp (ISO 8601 with offset, America/Los_Angeles), Email, Name, File name, File ID, File URL, MIME type, Size (bytes), Dimensions. Columns are located by header text in row 1 (`COLS` in `Code.gs`), so they can be reordered and extra columns added. Renaming a header breaks submissions until `COLS` is updated; the check runs before the file is saved to Drive. User text starting with `= + - @` is prefixed with `'` so it is not evaluated as a formula.
 
-## Notes
-- Authentication is Google's: the "within UC San Diego" access setting forces a ucsd.edu login; `Code.gs` also re-checks the `@ucsd.edu` suffix server-side.
+## Security notes
+- Identity comes only from `Session.getActiveUser()`, never `getEffectiveUser()` (which is the owner under "Execute as: Me"). The server re-checks the `@ucsd.edu` suffix on every submission.
+- Callable from the page via `google.script.run`: `submitEntry` (domain users), `setupSheets` and `diagnose` (refuse anyone but the deploying account).
 - Because the app runs as the deployer, submitters need no access to the folder or sheet.
 - Files are sent base64-encoded through `google.script.run`; capped at 10 MB.
 
@@ -56,5 +103,6 @@ Timestamp, Email, Name, File name, File ID, File URL, MIME type, Size (bytes), D
 cd tests && npm install && npm test
 ```
 - `make_fixtures.py` generates synthetic PNGs and PDFs into `tests/fixtures/` (git-ignored).
-- `check.js` loads `apps-script/Code.gs` in Node and checks `pngSize_`, `isPdf_`, and `aspectOk_` against the fixtures, and measures the PDFs with the same pdf.js version (3.11.174) that `Index.html` loads.
-- Not covered: Drive/Sheets writes, auth, `google.script.run`, and the browser code in `Index.html`.
+- `check.js` checks `pngSize_`, `isPdf_`, `aspectOk_` against the fixtures and measures the PDFs with the same pdf.js version (3.11.174) that `Index.html` loads.
+- `server.test.js` runs `Code.gs` in a Node `vm` with fakes from `gas-harness.js`: auth (including the `getEffectiveUser` bypass), header-name writes, formula escaping, write allowlist, owner-only functions, `setupSheets` idempotence, `diagnose` output.
+- Not covered: real Google services, `google.script.run` transport, and the browser code in `Index.html`.

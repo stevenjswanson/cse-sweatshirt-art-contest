@@ -1,0 +1,6 @@
+# Allowlist: exclude everything, then add back the deployable files.
+# Verify with `clasp status` before pushing.
+**/**
+!appsscript.json
+!Code.gs
+!Index.html

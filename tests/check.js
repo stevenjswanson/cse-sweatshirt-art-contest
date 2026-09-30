@@ -3,7 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 
-eval(fs.readFileSync(path.join(__dirname, '../apps-script/Code.gs'), 'utf8').replace(/^const /gm, 'var '));
+const vm = require('vm');
+const { load } = require('./gas-harness');
+const app = load(path.join(__dirname, '../apps-script/Code.gs'));
+const { pngSize_, isPdf_, aspectOk_ } = app;
+const CONFIG = vm.runInContext('CONFIG', app);
 
 const fx = (f) => path.join(__dirname, 'fixtures', f);
 // Apps Script byte arrays are signed (-128..127).

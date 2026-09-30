@@ -1,5 +1,5 @@
 {
   "private": true,
-  "scripts": { "test": "python3 make_fixtures.py && node check.js" },
+  "scripts": { "test": "python3 make_fixtures.py && node check.js && node server.test.js" },
   "devDependencies": { "pdfjs-dist": "3.11.174" }
 }

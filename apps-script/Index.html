@@ -23,7 +23,7 @@
 
       <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
       <script>
-        const CONFIG = <?!= JSON.stringify(config) ?>;
+        const CONFIG = <?!= configJson ?>;
         pdfjsLib.GlobalWorkerOptions.workerSrc =
           'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
@@ -122,13 +122,12 @@
               submitBtn.disabled = false;
             })
             .withFailureHandler(function (err) {
-              setStatus('Error: ' + err.message);
+              setStatus('Error: ' + (err && err.message ? err.message : 'Something went wrong.'));
               submitBtn.disabled = false;
             })
             .submitEntry({
               name: name,
               fileName: file.name,
-              mimeType: file.type,
               base64: dataUrl.split(',')[1], // strip "data:<mime>;base64,"
               pdfPageSizes: pdfSizes,
             });

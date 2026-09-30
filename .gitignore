@@ -1,3 +1,6 @@
 scratch/
 node_modules/
 tests/fixtures/
+# clasp: scriptId (kept local) and OAuth credentials (secret)
+.clasp.json
+.clasprc.json
