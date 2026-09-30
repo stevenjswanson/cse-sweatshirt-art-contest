@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+  </head>
+  <body>
+    <h1>CSE Sweatshirt Art Contest</h1>
+
+    <? if (!allowed) { ?>
+      <p>This form is only open to UC San Diego accounts.
+        <? if (email) { ?>You are signed in as <b><?= email ?></b>.<? } else { ?>We could not determine your account.<? } ?>
+        Please sign in with your @ucsd.edu Google account and reload.</p>
+    <? } else { ?>
+      <p>Signed in as <b><?= email ?></b></p>
+      <form id="entry">
+        <p><label>Your name<br><input type="text" id="name" maxlength="200" required></label></p>
+        <p><label>Image (PNG, JPEG, GIF, WebP, or SVG; max 10 MB)<br>
+          <input type="file" id="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" required></label></p>
+        <p><button type="submit" id="submit">Submit</button></p>
+      </form>
+      <p id="status"></p>
+
+      <script>
+        const MAX_BYTES = 10 * 1024 * 1024;
+        const form = document.getElementById('entry');
+        const statusEl = document.getElementById('status');
+        const submitBtn = document.getElementById('submit');
+
+        function setStatus(msg) { statusEl.textContent = msg; }
+
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          const name = document.getElementById('name').value.trim();
+          const file = document.getElementById('file').files[0];
+          if (!name || !file) { setStatus('Please enter your name and choose an image.'); return; }
+          if (file.size > MAX_BYTES) { setStatus('Image is larger than 10 MB.'); return; }
+
+          submitBtn.disabled = true;
+          setStatus('Uploading…');
+
+          const reader = new FileReader();
+          reader.onload = function () {
+            const base64 = reader.result.split(',')[1]; // strip "data:<mime>;base64,"
+            google.script.run
+              .withSuccessHandler(function (res) {
+                setStatus('Thanks! Your entry was received (' + res.fileName + ').');
+                form.reset();
+                submitBtn.disabled = false;
+              })
+              .withFailureHandler(function (err) {
+                setStatus('Error: ' + err.message);
+                submitBtn.disabled = false;
+              })
+              .submitEntry({ name: name, fileName: file.name, mimeType: file.type, base64: base64 });
+          };
+          reader.onerror = function () {
+            setStatus('Could not read the file.');
+            submitBtn.disabled = false;
+          };
+          reader.readAsDataURL(file);
+        });
+      </script>
+    <? } ?>
+  </body>
+</html>
