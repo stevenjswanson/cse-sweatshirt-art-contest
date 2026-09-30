@@ -11,6 +11,7 @@ The file goes to the contest Drive folder; a metadata row goes to the contest sp
 ## Layout
 - `apps-script/` — the Apps Script project. `.claspignore` is an allowlist: only `appsscript.json`, `Code.gs`, `Index.html` are pushed.
 - `tests/` — Node tests (not pushed).
+- `scripts/first-deploy.sh` — one-time project creation and first deployment.
 - `scripts/safe-deploy.sh` — release script (push → verify → version → update the existing deployment).
 
 ## Files (`apps-script/`)
@@ -29,6 +30,8 @@ The repo is public, so resource ids are not in the code. Set these under Project
 The deploying account needs permission to add files to the folder (it appears to be in a shared drive) and to edit the sheet.
 
 ## First deployment (clasp v3)
+`scripts/first-deploy.sh` (run from the repo root) does the steps below with pauses for the editor steps. It refuses to run if `apps-script/.clasp.json` exists.
+
 Prerequisites: enable the Apps Script API at https://script.google.com/home/usersettings; `npm i -g @google/clasp`; `clasp login` as your **@ucsd.edu** account; `clasp --version` shows 3.x.
 
 ```bash
